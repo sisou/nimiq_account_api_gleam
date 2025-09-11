@@ -1,0 +1,31 @@
+# fly.toml app configuration file generated for nimiq-account-api on 2025-09-11T13:41:51+02:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'nimiq-account-api'
+primary_region = 'fra'
+
+[build]
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = 'stop'
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ['app']
+
+[[http_service.checks]]
+  grace_period = "10s"
+  interval = "30s"
+  method = "GET"
+  timeout = "5s"
+  path = "/api/health"
+
+[[vm]]
+  size = 'shared-cpu-1x'
+
+[env]
+  HOST = "0.0.0.0"
+  PORT = "8080"

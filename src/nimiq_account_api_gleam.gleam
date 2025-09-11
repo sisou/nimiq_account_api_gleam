@@ -4,6 +4,7 @@ import dot_env
 import envoy
 import gleam/erlang/process
 import gleam/int
+import gleam/io
 import gleam/result
 import gleam/uri
 import mist
@@ -14,11 +15,16 @@ import wisp
 import wisp/wisp_mist
 
 pub fn main() {
+  io.println("Starting Nimiq Account API")
+
+  io.println("Loading .env file")
   dot_env.load_default()
 
+  io.println("Configuring logger")
   wisp.configure_logger()
   let secret_key_base = wisp.random_string(64)
 
+  io.println("Reading configuration from environment variables")
   let assert Ok(private_key_raw) = envoy.get("PRIVATE_KEY")
     as "PRIVATE_KEY env var not set"
   let assert Ok(private) = private_key.from_string(private_key_raw)
@@ -55,6 +61,7 @@ pub fn main() {
     )
   let handler = router.handle_request(_, context)
 
+  io.println("Starting server")
   let assert Ok(_) =
     wisp_mist.handler(handler, secret_key_base)
     |> mist.new()
@@ -70,5 +77,6 @@ pub fn main() {
     )
     |> mist.start()
 
+  io.println("Server started")
   process.sleep_forever()
 }
