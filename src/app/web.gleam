@@ -1,7 +1,7 @@
 import gleam/uri
 import nimiq/account/address
 import nimiq/key/ed25519/private_key
-import nimiq/key/public_key
+import nimiq/key/ed25519/public_key
 import wisp
 
 pub type KeyPair {
@@ -15,6 +15,7 @@ pub type Context {
     rpc_password: String,
     key_pair: KeyPair,
     exchange_address: address.Address,
+    api_key: String,
   )
 }
 

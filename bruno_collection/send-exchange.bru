@@ -1,0 +1,19 @@
+meta {
+  name: send/exchange
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{BASE_URL}}/api/send/exchange
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{API_KEY}}
+}
+
+settings {
+  encodeUrl: true
+}

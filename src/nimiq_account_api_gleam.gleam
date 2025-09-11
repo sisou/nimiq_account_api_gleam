@@ -10,7 +10,6 @@ import mist
 import nimiq/account/address
 import nimiq/key/ed25519/private_key
 import nimiq/key/ed25519/public_key as ed25519_public_key
-import nimiq/key/public_key
 import wisp
 import wisp/wisp_mist
 
@@ -27,11 +26,7 @@ pub fn main() {
 
   let public = ed25519_public_key.derive_key(private)
 
-  let key_pair =
-    web.KeyPair(
-      private: private,
-      public: public_key.EdDsaPublicKey(key: public),
-    )
+  let key_pair = web.KeyPair(private:, public:)
 
   let assert Ok(exchange_address_raw) = envoy.get("EXCHANGE_ADDRESS")
     as "EXCHANGE_ADDRESS env var not set"
@@ -47,6 +42,8 @@ pub fn main() {
   let assert Ok(rpc_password) = envoy.get("RPC_PASSWORD")
     as "RPC_PASSWORD env var not set"
 
+  let assert Ok(api_key) = envoy.get("API_KEY") as "API_KEY env var not set"
+
   let context =
     web.Context(
       key_pair:,
@@ -54,6 +51,7 @@ pub fn main() {
       rpc_uri:,
       rpc_username:,
       rpc_password:,
+      api_key:,
     )
   let handler = router.handle_request(_, context)
 
