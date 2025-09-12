@@ -29,6 +29,7 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
 
     ["api", "balance"] -> balance(req, ctx)
     ["api", "send", "exchange", amount] -> send_exchange(req, ctx, amount)
+    ["api", "transaction", hash] -> get_transaction(req, ctx, hash)
 
     ["api", "health"] -> wisp.ok() |> wisp.string_body("OK")
 
@@ -96,13 +97,14 @@ fn send_exchange(req: Request, ctx: Context, amount_param: String) -> Response {
       |> wisp.json_body(
         json.object([
           #("hash", tx_hash |> json.string()),
-          #("value", json.int(amount)),
+          #("value", amount |> json.int()),
           #(
             "recipient",
             ctx.exchange_address
               |> nimiq_address.to_user_friendly_address()
               |> json.string(),
           ),
+          #("status", "PENDING" |> json.string()),
         ])
         |> json.to_string(),
       )
@@ -110,6 +112,32 @@ fn send_exchange(req: Request, ctx: Context, amount_param: String) -> Response {
     Error(err) -> {
       wisp.internal_server_error()
       |> wisp.string_body("Failed to send transaction: " <> err)
+    }
+  }
+}
+
+fn get_transaction(req: Request, ctx: Context, hash: String) -> Response {
+  use <- wisp.require_method(req, Get)
+  use <- validate_api_key(req, ctx.api_key)
+
+  let assert Ok(current_height) = fetch_chain_height(ctx)
+
+  case fetch_transaction(ctx, hash, current_height) {
+    Ok(tx) -> {
+      wisp.ok()
+      |> wisp.json_body(
+        json.object([
+          #("hash", tx.hash |> json.string()),
+          #("value", tx.value |> json.int()),
+          #("recipient", tx.recipient |> json.string()),
+          #("status", tx.status |> json.string()),
+        ])
+        |> json.to_string(),
+      )
+    }
+    Error(err) -> {
+      wisp.internal_server_error()
+      |> wisp.string_body("Failed to get transaction: " <> err)
     }
   }
 }
@@ -283,6 +311,57 @@ fn send_transaction(
   unpack_rpc_response(response)
 }
 
+type Transaction {
+  Transaction(hash: String, value: Int, recipient: String, status: String)
+}
+
+fn fetch_transaction(
+  ctx: Context,
+  hash: String,
+  current_height: Int,
+) -> Result(Transaction, String) {
+  let request =
+    jsonrpc.request(method: "getTransactionByHash", id: jsonrpc.id(42))
+    |> jsonrpc.request_params([hash |> json.string()])
+    |> jsonrpc.request_to_json(json.preprocessed_array)
+    |> json.to_string()
+    |> request.set_body(make_base_request(ctx), _)
+
+  let response =
+    httpc.send(request)
+    |> result.map(fn(resp) { resp.body })
+    |> result.map(json.parse(_, jsonrpc.message_decoder()))
+
+  unpack_rpc_message(response)
+  |> result.map(fn(message) {
+    case message {
+      jsonrpc.ResponseMessage(jsonrpc.Response(_, _, result)) -> {
+        decode.run(result, {
+          use hash <- decode.subfield(["data", "hash"], decode.string)
+          use value <- decode.subfield(["data", "value"], decode.int)
+          use recipient <- decode.subfield(["data", "to"], decode.string)
+          use block_number <- decode.subfield(
+            ["data", "blockNumber"],
+            decode.int,
+          )
+          let status = case current_height / 60 > block_number / 60 {
+            True -> "CONFIRMED"
+            False -> "INCLUDED"
+          }
+          decode.success(Transaction(hash:, value:, recipient:, status:))
+        })
+        |> result.replace_error("Failed to decode transaction")
+      }
+      jsonrpc.ErrorResponseMessage(jsonrpc.ErrorResponse(_, _, error)) ->
+        Error(
+          "RPC Error: " <> int.to_string(error.code) <> " - " <> error.message,
+        )
+      _ -> Error("Invalid RPC response")
+    }
+  })
+  |> result.flatten()
+}
+
 fn make_base_request(ctx: Context) -> request.Request(String) {
   let assert Ok(req) = request.from_uri(ctx.rpc_uri)
   req
@@ -296,14 +375,11 @@ fn make_base_request(ctx: Context) -> request.Request(String) {
   )
 }
 
-fn unpack_rpc_response(
-  response: Result(
-    Result(jsonrpc.Response(a), json.DecodeError),
-    httpc.HttpError,
-  ),
+fn unpack_rpc_message(
+  response: Result(Result(a, json.DecodeError), httpc.HttpError),
 ) -> Result(a, String) {
   case response {
-    Ok(Ok(result)) -> Ok(result.result)
+    Ok(Ok(message)) -> Ok(message)
     Ok(Error(err)) ->
       Error(
         "Invalid JSON-RPC response: "
@@ -323,5 +399,17 @@ fn unpack_rpc_response(
           httpc.ResponseTimeout -> "Response timeout"
         },
       )
+  }
+}
+
+fn unpack_rpc_response(
+  response: Result(
+    Result(jsonrpc.Response(a), json.DecodeError),
+    httpc.HttpError,
+  ),
+) -> Result(a, String) {
+  case unpack_rpc_message(response) {
+    Ok(result) -> Ok(result.result)
+    Error(err) -> Error(err)
   }
 }

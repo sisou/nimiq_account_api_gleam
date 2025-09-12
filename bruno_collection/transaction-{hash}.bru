@@ -1,0 +1,19 @@
+meta {
+  name: transaction/{hash}
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{BASE_URL}}/api/transaction/6fba1eb3f8d67ca03bb7f4fa698c06a781daa05f658b85e06a3bf54056efa805
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{API_KEY}}
+}
+
+settings {
+  encodeUrl: true
+}
