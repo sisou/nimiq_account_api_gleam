@@ -28,7 +28,7 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
     [] -> home_page(req)
 
     ["api", "balance"] -> balance(req, ctx)
-    ["api", "send", "exchange"] -> send_exchange(req, ctx)
+    ["api", "send", "exchange", amount] -> send_exchange(req, ctx, amount)
 
     ["api", "health"] -> wisp.ok() |> wisp.string_body("OK")
 
@@ -74,9 +74,13 @@ fn balance(req: Request, ctx: Context) -> Response {
   }
 }
 
-fn send_exchange(req: Request, ctx: Context) -> Response {
+fn send_exchange(req: Request, ctx: Context, amount_param: String) -> Response {
   use <- wisp.require_method(req, Post)
   use <- validate_api_key(req, ctx.api_key)
+  use amount <- parse_amount(amount_param)
+
+  // Only allow sending at least 10000 NIM
+  use <- validate_min_amount(amount, 10_000 * float.round(coin.lunas_per_coin))
 
   let address =
     public_key.EdDsaPublicKey(ctx.key_pair.public)
@@ -84,16 +88,15 @@ fn send_exchange(req: Request, ctx: Context) -> Response {
 
   let assert Ok(balance) = fetch_balance(ctx, address)
 
-  // Only allow sending at least 1000 NIM
-  use <- validate_min_balance(balance, 1000 * float.round(coin.lunas_per_coin))
+  use <- validate_amount_vs_balance(amount, balance)
 
-  case send_transaction(ctx, ctx.exchange_address, coin.Coin(balance)) {
+  case send_transaction(ctx, ctx.exchange_address, coin.Coin(amount)) {
     Ok(tx_hash) -> {
       wisp.ok()
       |> wisp.json_body(
         json.object([
           #("hash", tx_hash |> json.string()),
-          #("value", json.int(balance)),
+          #("value", json.int(amount)),
           #(
             "recipient",
             ctx.exchange_address
@@ -157,19 +160,48 @@ fn validate_api_key(
   }
 }
 
-fn validate_min_balance(
-  balance: Int,
-  min_balance: Int,
-  next: fn() -> Response,
+fn parse_amount(amount_str: String, next: fn(Int) -> Response) -> Response {
+  case amount_str |> int.parse() {
+    Ok(amount) -> next(amount)
+    Error(Nil) ->
+      // Not Acceptable
+      wisp.response(406)
+      |> wisp.string_body("Invalid amount: " <> amount_str)
+  }
+}
+
+fn validate_min_amount(
+  amount amount: Int,
+  min_amount min_amount: Int,
+  next next: fn() -> Response,
 ) -> Response {
-  case balance >= min_balance {
+  case amount >= min_amount {
     True -> next()
     False -> {
       // Forbidden
       wisp.response(406)
       |> wisp.string_body(
-        "Insufficient balance, requires at least "
-        <> min_balance |> int.to_string()
+        "Insufficient amount, requires at least "
+        <> min_amount |> int.to_string()
+        <> " luna",
+      )
+    }
+  }
+}
+
+fn validate_amount_vs_balance(
+  amount amount: Int,
+  balance balance: Int,
+  next next: fn() -> Response,
+) -> Response {
+  case amount <= balance {
+    True -> next()
+    False -> {
+      // Forbidden
+      wisp.response(406)
+      |> wisp.string_body(
+        "Insufficient balance, can sent at most "
+        <> balance |> int.to_string()
         <> " luna",
       )
     }

@@ -1,11 +1,11 @@
 meta {
-  name: send/exchange
+  name: send/exchange/{{amount}}
   type: http
   seq: 2
 }
 
 post {
-  url: {{BASE_URL}}/api/send/exchange
+  url: {{BASE_URL}}/api/send/exchange/1500000000
   body: none
   auth: bearer
 }
