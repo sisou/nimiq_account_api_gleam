@@ -86,8 +86,8 @@ fn send_to_exchange(
   use <- validate_api_key(req, ctx.api_key)
   use amount <- parse_amount(amount_param)
 
-  // Only allow sending at least 10000 NIM
-  use <- validate_min_amount(amount, 10_000 * float.round(coin.lunas_per_coin))
+  // Only allow sending at least 2000 NIM (1100 NIM is gate.io's current minimum deposit)
+  use <- validate_min_amount(amount, 2000 * float.round(coin.lunas_per_coin))
 
   let address =
     public_key.EdDsaPublicKey(ctx.key_pair.public)
