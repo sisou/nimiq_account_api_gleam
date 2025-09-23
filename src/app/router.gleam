@@ -28,7 +28,9 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
     [] -> home_page(req)
 
     ["api", "balance"] -> balance(req, ctx)
-    ["api", "send", "exchange", amount] -> send_exchange(req, ctx, amount)
+    ["api", "send", "exchange", amount] -> send_to_exchange(req, ctx, amount)
+    ["api", "send", address, amount] ->
+      send_to_address(req, ctx, address, amount)
     ["api", "transaction", hash] -> get_transaction(req, ctx, hash)
 
     ["api", "health"] -> wisp.ok() |> wisp.string_body("OK")
@@ -75,7 +77,11 @@ fn balance(req: Request, ctx: Context) -> Response {
   }
 }
 
-fn send_exchange(req: Request, ctx: Context, amount_param: String) -> Response {
+fn send_to_exchange(
+  req: Request,
+  ctx: Context,
+  amount_param: String,
+) -> Response {
   use <- wisp.require_method(req, Post)
   use <- validate_api_key(req, ctx.api_key)
   use amount <- parse_amount(amount_param)
@@ -101,6 +107,54 @@ fn send_exchange(req: Request, ctx: Context, amount_param: String) -> Response {
           #(
             "recipient",
             ctx.exchange_address
+              |> nimiq_address.to_user_friendly_address()
+              |> json.string(),
+          ),
+          #("status", "PENDING" |> json.string()),
+        ])
+        |> json.to_string(),
+      )
+    }
+    Error(err) -> {
+      wisp.internal_server_error()
+      |> wisp.string_body("Failed to send transaction: " <> err)
+    }
+  }
+}
+
+fn send_to_address(
+  req: Request,
+  ctx: Context,
+  recipient_param: String,
+  amount_param: String,
+) -> Response {
+  use <- wisp.require_method(req, Post)
+  use <- validate_api_key(req, ctx.api_key)
+  use recipient <- parse_address(recipient_param)
+  use amount <- parse_amount(amount_param)
+
+  // TODO: This method should ideally not allow sending to just any recipient. It should instead only allow returning
+  // funds to addresses that also sent funds in. It must then however track in persisted state which transactions have
+  // been refunded that way.
+
+  let address =
+    public_key.EdDsaPublicKey(ctx.key_pair.public)
+    |> public_key.to_address()
+
+  let assert Ok(balance) = fetch_balance(ctx, address)
+
+  use <- validate_amount_vs_balance(amount, balance)
+
+  case send_transaction(ctx, recipient, coin.Coin(amount)) {
+    Ok(tx_hash) -> {
+      wisp.ok()
+      |> wisp.json_body(
+        json.object([
+          #("hash", tx_hash |> json.string()),
+          #("value", amount |> json.int()),
+          #(
+            "recipient",
+            recipient
               |> nimiq_address.to_user_friendly_address()
               |> json.string(),
           ),
@@ -195,6 +249,18 @@ fn parse_amount(amount_str: String, next: fn(Int) -> Response) -> Response {
       // Not Acceptable
       wisp.response(406)
       |> wisp.string_body("Invalid amount: " <> amount_str)
+  }
+}
+
+fn parse_address(address_str: String, next: fn(Address) -> Response) -> Response {
+  case address_str |> nimiq_address.from_string() {
+    Ok(address) -> next(address)
+    Error(err) ->
+      // Not Acceptable
+      wisp.response(406)
+      |> wisp.string_body(
+        "Invalid address: " <> address_str <> " (" <> err <> ")",
+      )
   }
 }
 
